@@ -1,5 +1,6 @@
 package.path = "./?.lua;" .. package.path
 
+local love = love
 local redis = require 'redis'
 local redisClient 
 local redisConfig = {
@@ -8,54 +9,146 @@ local redisConfig = {
 	db   = 1,
 }
 
+local redisData = {}
+
 local function connectRedis()
 	redisClient = redis.connect(redisConfig)
 	redisClient:select(redisConfig.db)
-end 
-
-local keys
-function love.load() --×ÊÔ´¼ÓÔØ»Øµ÷º¯Êý£¬½ö³õÊ¼»¯Ê±µ÷ÓÃÒ»´Î
-	connectRedis()
-	-- redisClient:set('test', '1111111')
-	-- local value = redisClient:get('test')
-	-- love.window.showMessageBox("testRedis", value)
 end
 
 local function useDefaultFont(text, x, y, size)
-	love.graphics.setColor(255,0,0)
+	love.graphics.setColor(0, 0, 0)
 	love.graphics.setBlendMode("alpha")
-	local font = love.graphics.newFont( size )
+	local font = love.graphics.newFont(size)
 	love.graphics.setFont(font)
-	love.graphics.print(text,x,y+size)
-
+	love.graphics.print(text, x, y)
 end
 
-function love.draw() --»æÍ¼»Øµ÷º¯Êý£¬Ã¿ÖÜÆÚµ÷ÓÃ
-	love.graphics.setBlendMode("alpha")
-	love.graphics.setColor(255, 255, 255)
-	love.graphics.rectangle("fill", 0, 0, 800, 600)
+local function useHanZiFont(text, x, y, size)
+	local font = love.graphics.newFont("simkai.ttf", size)
+	love.graphics.setFont(font)
+	love.graphics.print(text, x, y)
+end
 
-	love.graphics.setColor(0, 0, 0)
-	love.graphics.line(200, 0, 200, 600)
+local keys
 
-	love.graphics.setColor(0, 0, 0)
-	love.graphics.rectangle("line", 0, 0, 800, 600)
+-- REDIS KEYç±»åž‹
+local REDIS_KEY_TYPE = {
+	[1]	= 'string',
+	[2]	= 'hash',
+}
 
-	keys = redisClient:keys('*')
-	table.sort(keys, function(a, b) return a < b end) -- keyÅÅÐò
-	local len = #keys
-	local keyHight = 30
-	for i = 1, len do
-		love.graphics.setColor(0, 0, 255)
-		love.graphics.rectangle("line", 0,  (i - 1) * keyHight, 200, 30)
-		useDefaultFont(keys[i], 20 , 2 + (i - 1) * keyHight, 10)
+-- unicode_to_utf8
+local function unicode_to_utf8(convertStr)
+	if type(convertStr) ~= "string" then
+		return convertStr
+	end
+	local bit = require("bit")
+	local resultStr=""
+	local i=1
+	while true do
+		local num1 = string.byte(convertStr, i)
+		local unicode
+		if num1 ~= nil and string.sub(convertStr, i, i+1) == "\\u" then
+			unicode = tonumber("0x" .. string.sub(convertStr, i+2, i+5))
+			i = i+6
+		elseif num1 ~= nil then
+			unicode = num1
+			i = i+1
+		else
+			break
+		end
+		if unicode <= 0x007f then
+			resultStr = resultStr .. string.char(bit.band(unicode, 0x7f))
+		elseif unicode >= 0x0080 and unicode <= 0x07ff then
+			resultStr = resultStr .. string.char(bit.bor(0xc0, bit.band(bit.rshift(unicode, 6), 0x1f)))
+			resultStr = resultStr .. string.char(bit.bor(0x80, bit.band(unicode, 0x3f)))
+		elseif unicode >= 0x0800 and unicode <= 0xffff then
+			resultStr = resultStr .. string.char(bit.bor(0xe0, bit.band(bit.rshift(unicode, 12), 0x0f)))
+			resultStr = resultStr .. string.char(bit.bor(0x80, bit.band(bit.rshift(unicode, 6), 0x3f)))
+			resultStr = resultStr .. string.char(bit.bor(0x80, bit.band(unicode, 0x3f)))
+		end
+	end
+	resultStr = resultStr..'\0'
+	return resultStr
+end
+
+local function drawKeyInfo(key)
+	local keyType = redisClient:type(key)
+	useDefaultFont(keyType .. " : ", 220, 10, 10)
+	useDefaultFont(key, 300, 10, 10)
+	if keyType == REDIS_KEY_TYPE[1] then
+		local value = redisClient:get(key)
+		useDefaultFont(value, 220, 40, 10)
+	elseif keyType == REDIS_KEY_TYPE[2] then
+		love.graphics.rectangle("line", 200, 30, 600, 30)
+		useDefaultFont("row", 220, 35, 10)
+		useDefaultFont("key", 320, 40, 10)
+		useDefaultFont("value", 420, 40, 10)
+
+		local hkeys = redisClient:hkeys(key)
+		table.sort(hkeys, function(a, b) return a < b end)
+		local hashLen = #hkeys
+		local initX = 200
+		local initY = 60
+		local height = 30
+		for i = 1, hashLen do
+			love.graphics.setBlendMode("multiply")
+			local y = (i - 1) * height + initY
+			love.graphics.rectangle("line", initX, y, 600, height)
+			useDefaultFont(i, initX + 20, y + 10, 10)
+			useDefaultFont(hkeys[i], initX + 120, y + 10, 10)
+			useHanZiFont(unicode_to_utf8(redisClient:hget(key, hkeys[i])), initX + 220, y + 10, 10)
+		end
 	end
 end
 
-function love.update(dt) --¸üÐÂ»Øµ÷º¯Êý£¬Ã¿ÖÜÆÚµ÷ÓÃ
+function love.load() --èµ„æºåŠ è½½å›žè°ƒå‡½æ•°ï¼Œä»…åˆå§‹åŒ–æ—¶è°ƒç”¨ä¸€æ¬¡
+	connectRedis()
+end
+
+local isInit = 0
+function love.draw() --ç»˜å›¾å›žè°ƒå‡½æ•°ï¼Œæ¯å‘¨æœŸè°ƒç”¨
+	if isInit <= 0 then
+		love.graphics.setBlendMode("alpha")
+		love.graphics.setColor(255, 255, 255)
+		love.graphics.rectangle("fill", 0, 0, 800, 600)
+
+		love.graphics.setColor(0, 0, 0)
+		love.graphics.line(200, 0, 200, 600)
+
+		love.graphics.setColor(0, 0, 0)
+		love.graphics.rectangle("line", 0, 0, 800, 600)
+
+		love.graphics.rectangle("line", 200, 0, 800, 30)
+
+		-- keys *
+		keys = redisClient:keys('*')
+		table.sort(keys, function(a, b) return a < b end) -- keyæŽ’åº
+		local len = #keys
+		local keyHight = 30
+		for i = 1, len do
+			love.graphics.setBlendMode("multiply")
+			love.graphics.setColor(0, 0, 255)
+			love.graphics.rectangle("line", 0,  (i - 1) * keyHight, 200, 30)
+			useDefaultFont(keys[i], 20, (i - 1) * keyHight + 10, 10)
+		end
+		drawKeyInfo(keys[1])
+
+		isInit = isInit + 1
+	end
+end
+
+function love.update(dt) --æ›´æ–°å›žè°ƒå‡½æ•°ï¼Œæ¯å‘¨æœŸè°ƒç”¨
 
 end
 
-function love.keypressed(key) --¼üÅÌ¼ì²â»Øµ÷º¯Êý£¬µ±¼üÅÌÊÂ¼þ´¥·¢ÊÇµ÷ÓÃ
+function love.keypressed(key) --é”®ç›˜æ£€æµ‹å›žè°ƒå‡½æ•°ï¼Œå½“é”®ç›˜äº‹ä»¶è§¦å‘æ˜¯è°ƒç”¨
 
+end
+
+function love.mousepressed(x, y, button, istouch)
+	if button == 1 then
+		--love.window.showMessageBox("test", x .. ' : ' .. y)
+	end
 end
