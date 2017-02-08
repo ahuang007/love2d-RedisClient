@@ -5,28 +5,11 @@ local redis = require 'redis'
 local settings = require 'settings'
 local redisConfig = settings.redisConfig
 
-
 local redisClient
-local redisData = {} -- 缓存数据
-
-local keys
-local hkeys
 
 local function connectRedis()
     redisClient = redis.connect(redisConfig)
     redisClient:select(redisConfig.db)
-end
-
-local function useDefaultFont(size)
-    love.graphics.setColor(0, 0, 0)
-    love.graphics.setBlendMode("alpha")
-    local font = love.graphics.newFont(size)
-    love.graphics.setFont(font)
-end
-
-local function useHanZiFont(size)
-    local font = love.graphics.newFont("simkai.ttf", size)
-    love.graphics.setFont(font)
 end
 
 -- REDIS KEY类型
@@ -75,7 +58,7 @@ function love.load(arg)
     love.graphics.setBackgroundColor(35, 42, 50, 255)
     mgr = UIManager:getInstance()
 
-    keys = redisClient:keys('*')
+    local keys = redisClient:keys('*')
     table.sort(keys, function(a, b) return a < b end) -- key排序
     local len = #keys
     local keyHight = 20
@@ -97,24 +80,6 @@ function love.load(arg)
     keyTypeEdit:setPos(0, 0)
     keyTypeEdit:setSize(600, 20)
     contentValue:addChild(keyTypeEdit)
-
---    local contentHashList = UIContent:new()
---    contentHashList:setPos(0, 20)
---    contentHashList:setSize(600, 280)
---    contentHashList:setContentSize(600, 280)
---    contentValue:addChild(contentHashList)
---
---    local contentHashKey = UIContent:new()
---    contentHashKey:setPos(0, 300)
---    contentHashKey:setSize(600, 100)
---    contentHashKey:setContentSize(600, 100)
---    contentValue:addChild(contentHashKey)
---
---    local contentHashValue = UIContent:new()
---    contentHashValue:setPos(0, 400)
---    contentHashValue:setSize(600, 200)
---    contentHashValue:setContentSize(600, 200)
---    contentValue:addChild(contentHashValue)
 
     for i = 1, len do
         local keyEditText = UIEditText:new()
@@ -139,7 +104,7 @@ function love.load(arg)
                 hashContent:setText(value)
                 contentValue:addChild(hashContent)
             elseif keyType == REDIS_KEY_TYPE[2] then
-                hkeys = redisClient:hkeys(keys[i])
+                local hkeys = redisClient:hkeys(keys[i])
                 table.sort(hkeys, function(a, b) return a < b end)
                 local hashLen = #hkeys
 
@@ -149,42 +114,45 @@ function love.load(arg)
                 hashContent:setContentSize(600, 580)
                 contentValue:addChild(hashContent)
 
-                local hashTable = UIContent:new()
-                hashTable:setPos(0, 0)
-                local tableHight = (hashLen+1)*keyHight + keyHight
-                tableHight = tableHight > 280 and 280 or tableHight
-                hashTable:setSize(600, tableHight)
-                hashTable:setContentSize(600, (hashLen+1)*keyHight)
-                hashContent:addChild(hashTable)
-
                 local tableHeadText = UIEditText:new()
                 tableHeadText:setPos(0, 0)
                 tableHeadText:setSize(600, keyHight)
                 tableHeadText:setText(string.format("%10s%20s%50s", 'row', 'key', 'value'))
-                hashTable:addChild(tableHeadText)
+                hashContent:addChild(tableHeadText)
 
+                local tableHight = hashLen*keyHight + keyHight
+                tableHight = tableHight > 280 and 280 or tableHight
+                local list = redisClient:hgetall(keys[i])
                 for j = 1, hashLen do
                     local hashValueEdit = UIEditText:new()
                     hashValueEdit:setPos(0, (j-1)*keyHight + keyHight)
                     hashValueEdit:setSize(600, keyHight)
                     hashValueEdit:setText(string.format("%10s%20s%50s", j, hkeys[j], '...'))
-                    hashTable:addChild(hashValueEdit)
+                    hashContent:addChild(hashValueEdit)
 
+                    local hashKeyEdit
+                    local hashValueText
+                    local hashValue = list[hkeys[j]]
                     hashValueEdit.events:on(UI_CLICK, function()
                         -- 增加key
-                        local hashKeyEdit = UIEditText:new()
+                        if hashKeyEdit then
+                            hashContent:removeChild(hashKeyEdit)
+                        end
+                        hashKeyEdit = UIEditText:new()
                         hashKeyEdit:setPos(0, tableHight)
                         hashKeyEdit:setSize(600, 50)
                         hashKeyEdit:setText("key\t:\t" .. hkeys[j])
                         hashContent:addChild(hashKeyEdit)
 
                         -- 显示value
-                        local hashValue = redisClient:hget(keys[i], hkeys[j])
-                        local hashValueEdit = UIEditText:new()
-                        hashValueEdit:setPos(0, tableHight + 50)
-                        hashValueEdit:setSize(600, 2000)
-                        hashValueEdit:setText("value\t:\t" .. hashValue)
-                        hashContent:addChild(hashValueEdit)
+                        if hashValueText then
+                            hashContent:removeChild(hashValueText)
+                        end
+                        hashValueText = UIEditText:new()
+                        hashValueText:setPos(0, tableHight+50)
+                        hashValueText:setSize(600, 580 - (tableHight + 50))
+                        hashValueText:setText("value\t:\t" .. hashValue)
+                        hashContent:addChild(hashValueText)
                     end)
                 end
             end
